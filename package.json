@@ -9,6 +9,7 @@
         "@modelcontextprotocol/sdk": "^1.10.2",
         "@netlify/functions": "^2.5.1",
         "@types/express": "^5.0.1",
+        "contentful-management": "^11.52.2",
         "express": "^5.1.0",
         "fetch-to-node": "^2.0.0",
         "serverless-http": "^3.2.0",

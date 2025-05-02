@@ -7,6 +7,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 
+import {createClient} from 'contentful-management'
+
+
 export const setupMCPServer = (): McpServer => {
 
   const server = new McpServer(
@@ -17,97 +20,63 @@ export const setupMCPServer = (): McpServer => {
     { capabilities: { logging: {} } }
   );
 
-  // Register a prompt template that allows the server to
-  // provide the context structure and (optionally) the variables
-  // that should be placed inside of the prompt for client to fill in.
-  server.prompt(
-    "greeting-template",
-    "A simple greeting prompt template",
-    {
-      name: z.string().describe("Name to include in greeting"),
-    },
-    async ({ name }): Promise<GetPromptResult> => {
-      return {
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: `Please greet ${name} in a friendly manner.`,
-            },
-          },
-        ],
-      };
-    }
-  );
+  const client = createClient({
+    accessToken: process.env.CONTENTFUL_MANAGEMENT_TOKEN!
+  })
 
-  // Register a tool specifically for testing the ability
-  // to resume notification streams to the client
   server.tool(
-    "start-notification-stream",
-    "Starts sending periodic notifications for testing resumability",
+    "update-contentful-entry",
+    "Updates a specific entry in contentful",
     {
-      interval: z
-        .number()
-        .describe("Interval in milliseconds between notifications")
-        .default(100),
-      count: z
-        .number()
-        .describe("Number of notifications to send (0 for 100)")
-        .default(10),
+      content: z
+        .string()
+        .describe("The new content for the entry"),
+      entryId: z
+        .string()
+        .describe("The contentful entry ID"),
+      field: z.
+        string()
+        .describe("The contentful field"),
     },
     async (
-      { interval, count },
-      { sendNotification }
+      { content, entryId, field },
+      _ctx
     ): Promise<CallToolResult> => {
-      const sleep = (ms: number) =>
-        new Promise((resolve) => setTimeout(resolve, ms));
-      let counter = 0;
-
-      while (count === 0 || counter < count) {
-        counter++;
-        try {
-          await sendNotification({
-            method: "notifications/message",
-            params: {
-              level: "info",
-              data: `Periodic notification #${counter} at ${new Date().toISOString()}`,
-            },
-          });
-        } catch (error) {
-          console.error("Error sending notification:", error);
-        }
-        // Wait for the specified interval
-        await sleep(interval);
+      const spaceId = process.env.CONTENTFUL_SPACE_ID;
+      const environmentId = process.env.CONTENTFUL_ENVIRONMENT_ID || "master";
+      
+      if (!spaceId || !environmentId) {
+        throw new Error("Missing Contentful credentials: check CONTENTFUL_SPACE_ID and CONTENTFUL_ENVIRONMENT_ID");
       }
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Started sending periodic notifications every ${interval}ms`,
-          },
-        ],
-      };
+      try {
+        const space = await client.getSpace(spaceId);
+        const environment = await space.getEnvironment(environmentId);
+        const entry = await environment.getEntry(entryId);
+        entry.fields[field] = { 'en-US': content };
+        const updatedEntry = await entry.update();
+        await updatedEntry.publish();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Entry ${entryId} field '${field}' updated and published successfully.`,
+            },
+          ],
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to update entry: ${error.message}`,
+            },
+          ],
+        };
+      }
     }
   );
 
-  // Create a resource that can be fetched by the client through
-  // this MCP server.
-  server.resource(
-    "greeting-resource",
-    "https://example.com/greetings/default",
-    { mimeType: "text/plain" },
-    async (): Promise<ReadResourceResult> => {
-      return {
-        contents: [
-          {
-            uri: "https://example.com/greetings/default",
-            text: "Hello, world!",
-          },
-        ],
-      };
-    }
-  );
+
   return server;
 };
